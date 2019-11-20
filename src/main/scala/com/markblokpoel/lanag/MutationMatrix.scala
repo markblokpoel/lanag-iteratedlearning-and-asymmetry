@@ -2,9 +2,11 @@ package com.markblokpoel.lanag
 
 import com.markblokpoel.lanag.ambiguityhelps.RSA1ShotAgent
 import com.markblokpoel.lanag.core.{ContentSignal, ReferentialIntention}
+import com.markblokpoel.lanag.math.Distribution
 import com.markblokpoel.lanag.rsa.Lexicon
 import com.markblokpoel.lanag.util.RNG
 import org.apache.spark.SparkContext
+
 @SerialVersionUID(100L)
 case class MutationMatrix(vocabularySize: Int,
                           contextSize: Int,
@@ -12,7 +14,41 @@ case class MutationMatrix(vocabularySize: Int,
                           k: Int,
                           sampleSize: Int,
                           allPossibleAgents: List[RSA1ShotAgent],
-                          q: Map[(RSA1ShotAgent, RSA1ShotAgent), Double])
+                          q: List[List[Double]]) {
+  def apply(speaker: RSA1ShotAgent, learner: RSA1ShotAgent): Double =
+    q(allPossibleAgents.indexOf(speaker))(allPossibleAgents.indexOf(learner))
+
+  def learnerDistribution(speaker: RSA1ShotAgent): List[Double] =
+    q(allPossibleAgents.indexOf(speaker))
+
+  def posterior(speakerPriors: Distribution[RSA1ShotAgent])
+    : Distribution[RSA1ShotAgent] = {
+    assert(speakerPriors.length == allPossibleAgents.length)
+
+    @scala.annotation.tailrec
+    def posteriorRec(
+        speakerPriors: Distribution[RSA1ShotAgent],
+        speakerId: Int,
+        q: List[List[Double]],
+        posterior: Vector[BigDecimal]): Distribution[RSA1ShotAgent] = q match {
+      case Nil => Distribution(allPossibleAgents.toVector, posterior)
+      case head :: tail =>
+        val speaker = allPossibleAgents(speakerId)
+        val partialPosterior = head.map(_ * speakerPriors(speaker))
+        val newPosterior =
+          (posterior zip partialPosterior).map(p => p._1 + p._2)
+        posteriorRec(speakerPriors, speakerId + 1, tail, newPosterior)
+    }
+
+    posteriorRec(
+      speakerPriors,
+      speakerId = 0,
+      q,
+      Vector.tabulate[BigDecimal](allPossibleAgents.length)(_ =>
+        BigDecimal(0.0))
+    )
+  }
+}
 
 case object MutationMatrix {
   type AgentPair = (RSA1ShotAgent, RSA1ShotAgent)
@@ -32,52 +68,38 @@ case object MutationMatrix {
     val datum: Datum = for (_ <- 0 until sampleSize)
       yield generateObservations(vocabularySize, contextSize, k)
 
-    val allSpeakerLearnerPairs: List[AgentPair] =
-      for (speaker <- allPossibleAgents; learner <- allPossibleAgents)
-        yield (speaker, learner)
-
-    val pairDatum: List[(AgentPair, Datum)] =
-      allSpeakerLearnerPairs.map(pair => pair -> datum)
+    val allPossibleAGentBroadcast = sparkContext.broadcast(allPossibleAgents)
+    val datumBroadcast = sparkContext.broadcast(datum)
 
     val q = sparkContext
-      .parallelize(pairDatum)
-      .map(b => {
-        val (agentPair, datum) = b
-        val (speaker, learner) = agentPair
-
-        val transitionProbability = datum
-          .map(d => {
-            d.map(obs => {
-                val (signal, intention) = obs
-                val speakerP = speaker.asSpeaker.inferredLexicon(
-                  signal.content.getOrElse(-1),
-                  intention.content.getOrElse(-1))
-                val learnerP = learner.asSpeaker.inferredLexicon(
-                  signal.content.getOrElse(-1),
-                  intention.content.getOrElse(-1))
-                speakerP * learnerP
-              })
-              .foldLeft(1.0)(_ * _)
-          })
-          .sum
-        agentPair -> transitionProbability
+      .parallelize(allPossibleAgents)
+      .map(speaker => {
+        for (learner <- allPossibleAGentBroadcast.value) yield {
+          datumBroadcast.value
+            .map(d => {
+              d.map(obs => {
+                  val (signal, intention) = obs
+                  val speakerP =
+                    speaker.asSpeaker.inferredLexicon(signal.content.get,
+                                                      intention.content.get)
+                  val learnerP =
+                    learner.asSpeaker.inferredLexicon(signal.content.get,
+                                                      intention.content.get)
+                  speakerP * learnerP
+                })
+                .foldLeft(1.0)(_ * _)
+            })
+            .sum
+        }
       })
-
-    val qNorm1 =
-      for (ag1 <- allPossibleAgents) yield {
-        val row = for (ag2 <- allPossibleAgents) yield q((ag1, ag2))
-        val sum = row.sum
-        if (sum > 0)
-          (allPossibleAgents zip row.map(_ / sum))
-            .map(a => (ag1, a._1) -> a._2)
-            .toMap
-        else
-          (allPossibleAgents zip row.map(_ => 0.0))
-            .map(a => (ag1, a._1) -> a._2)
-            .toMap
-      }
-
-    val qNorm2 = qNorm1.flatten.toMap
+      // normalize across speakers
+      .map(speakerRow => {
+        val total = speakerRow.sum
+        if (total > 0) speakerRow.map(_ / total)
+        else speakerRow.map(_ => 0.0)
+      })
+      .toLocalIterator
+      .toList
 
     MutationMatrix(vocabularySize,
                    contextSize,
@@ -85,7 +107,7 @@ case object MutationMatrix {
                    k,
                    sampleSize,
                    allPossibleAgents,
-                   qNorm2)
+                   q)
   }
 
   private def allBooleanPermutations(length: Int): List[Vector[Double]] = {

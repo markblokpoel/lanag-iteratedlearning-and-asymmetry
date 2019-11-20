@@ -12,7 +12,7 @@ import java.io.{
 import com.markblokpoel.lanag.util.SparkSimulation
 
 object PrototypingMain extends App {
-  val sm = SparkSimulation(local = false, cores = 0)
+  val sm = SparkSimulation(local = true, cores = 0)
 
   val vocabularySize = 3
   val contextSize = 3
@@ -23,7 +23,7 @@ object PrototypingMain extends App {
     contextSize = contextSize,
     order = order,
     sparkContext = sm.context,
-    k = 10,
+//    k = 5,
     sampleSize = 250
   )
 
@@ -43,10 +43,17 @@ object PrototypingMain extends App {
   for (ag1 <- mmRead.allPossibleAgents)
     pw.println(
       (for (ag2 <- mmRead.allPossibleAgents)
-        yield mmRead.q((ag1, ag2))).mkString(";"))
+        yield mmRead(ag1, ag2)).mkString(";"))
   pw.close()
 
-//  for(ag1 <- mmRead.allPossibleAgents)
-//    println((for(ag2 <- mmRead.allPossibleAgents) yield mmRead.q((ag1, ag2))).mkString(";"))
+  for (ag1 <- mmRead.allPossibleAgents)
+    println(
+      (for (ag2 <- mmRead.allPossibleAgents)
+        yield mmRead(ag1, ag2)).mkString(";"))
+
+  for (i <- mmRead.allPossibleAgents.indices) {
+    println(s"--$i--")
+    println(mmRead.allPossibleAgents(i))
+  }
 
 }
