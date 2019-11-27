@@ -1,4 +1,4 @@
-package com.markblokpoel.lanag
+package com.markblokpoel.lanag.ilasymmetry
 
 import com.markblokpoel.lanag.ambiguityhelps.RSA1ShotAgent
 import com.markblokpoel.lanag.core.{ContentSignal, ReferentialIntention}
@@ -54,16 +54,28 @@ case object MutationMatrix {
   type AgentPair = (RSA1ShotAgent, RSA1ShotAgent)
   type Datum = Seq[Seq[(ContentSignal, ReferentialIntention)]]
 
+  private def mutate(signal: ContentSignal, vocabularySize: Int): ContentSignal = {
+    if(signal.isDefined) {
+      val signalId = signal.content.get
+      val randomSignalId = (signalId + 1 + RNG.nextInt(vocabularySize - 1)) % vocabularySize
+      ContentSignal(randomSignalId)
+    } else {
+      ContentSignal(None)
+    }
+  }
+
   def apply(vocabularySize: Int,
             contextSize: Int,
             order: Int,
             sparkContext: SparkContext,
             k: Int = 5,
-            sampleSize: Int = 10): MutationMatrix = {
+            sampleSize: Int = 10,
+            errorRate: Double = 0.0): MutationMatrix = {
     val allPossibleAgents: List[RSA1ShotAgent] =
       allBooleanPermutations(contextSize * vocabularySize)
-        .map(d =>
-          new RSA1ShotAgent(Lexicon(vocabularySize, contextSize, d), order))
+        .map(permutation => Lexicon(vocabularySize, contextSize, permutation))
+        .filter(lexicon => lexicon.isConsistent)
+        .map(lexicon => new RSA1ShotAgent(lexicon, order))
 
     val datum: Datum = for (_ <- 0 until sampleSize)
       yield generateObservations(vocabularySize, contextSize, k)
@@ -78,7 +90,9 @@ case object MutationMatrix {
           datumBroadcast.value
             .map(d => {
               d.map(obs => {
-                  val (signal, intention) = obs
+                  val (signal, intention) =
+                    if(RNG.nextProbability < errorRate) obs
+                    else (mutate(obs._1, vocabularySize), obs._2)
                   val speakerP =
                     speaker.asSpeaker.inferredLexicon(signal.content.get,
                                                       intention.content.get)
@@ -127,4 +141,5 @@ case object MutationMatrix {
       yield
         (ContentSignal(RNG.nextInt(vocabularySize)),
          ReferentialIntention(RNG.nextInt(contextSize)))
+
 }
