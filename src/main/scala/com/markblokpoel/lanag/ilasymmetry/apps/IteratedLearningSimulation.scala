@@ -1,12 +1,10 @@
 package com.markblokpoel.lanag.ilasymmetry.apps
 
-import java.io.{File, FileInputStream, ObjectInputStream, PrintWriter}
+import java.io.{File, PrintWriter}
 
-import com.markblokpoel.lanag.ilasymmetry.{Evolution, Generation, MutationMatrix, Population}
-import com.markblokpoel.lanag.util.ConfigWrapper
+import com.markblokpoel.lanag.ilasymmetry.{Evolution, Generation, Population, TransitionMatrix}
+import com.markblokpoel.lanag.util.{ConfigWrapper, RNG}
 import com.typesafe.config.ConfigFactory
-
-import scala.util.Random
 
 object IteratedLearningSimulation extends App {
 
@@ -35,31 +33,41 @@ object IteratedLearningSimulation extends App {
   val fitnessNrInteractionRounds = conf.getOrElse[Int](
     "iterated-learning.simulation.fitness-nr-interaction-rounds",
     5)
-  val fitnessInterlocutorGroupSize = conf.getOrElse[Double](
+  val fitnessInterlocutorGroupSize = conf.getOrElse[Int](
     "iterated-learning.simulation.fitness-interlocutor-group-size",
     5)
 
-  val ois = new ObjectInputStream(new FileInputStream(transitionMatrixFilename))
-  val mm = ois.readObject.asInstanceOf[MutationMatrix]
-  ois.close()
+  val transitionMatrixFilenameBase = conf.getOrElse[String](
+    "iterated-learning.compute-transition-matrix.matrix-filename-base",
+    "output/default")
+  val k =
+    conf.getOrElse[Int]("iterated-learning.compute-transition-matrix.k", 5)
+  val sampleSize = conf.getOrElse[Int](
+    "iterated-learning.compute-transition-matrix.sample-size",
+    15)
+  val errorRate = conf.getOrElse[Double](
+    "iterated-learning.compute-transition-matrix.error-rate",
+    0.05)
 
-  val consistentAgents = mm.allPossibleAgents.filter(_.originalLexicon.isConsistent)
-  val initialAgents = Random.shuffle(consistentAgents).take(populationSize)
+  //  val ois = new ObjectInputStream(new FileInputStream(transitionMatrixFilename))
+  //  val mm = ois.readObject.asInstanceOf[MutationMatrix]
+  //  ois.close()
+
+  val transitionMatrix = TransitionMatrix(vocabularySize, contextSize, order, k, sampleSize, errorRate)
+  val consistentAgents = transitionMatrix.allPossibleAgents.filter(_.originalLexicon.isConsistent)
+  val initialAgents =
+    (for(_ <- 0 until populationSize) yield consistentAgents(RNG.nextInt(consistentAgents.length))).toList
   val initialGeneration = Generation(Population(initialAgents), 0)
 
   val evolution = Evolution(initialGeneration,
-                            mm,
-                            maxNrGenerations,
-                            fitnessNrInteractionRounds,
-                            fitnessInterlocutorGroupSize,
-                            beta)
+    transitionMatrix,
+    maxNrGenerations,
+    fitnessNrInteractionRounds,
+    fitnessInterlocutorGroupSize,
+    beta)
 
   val dataFile = new PrintWriter(new File(dataOutputFilename))
-  dataFile.println(
-    "generation; meanFitness; meanAmbiguity; varAmbiguity; meanAsymmetry; varAsymmetry")
-
-  val dataFile2 = new PrintWriter(new File("output/populationTypes.csv"))
-  dataFile2.println("generation; agentId; count")
+  dataFile.println("generation; agentIdx; fitness; meanAmbiguity; varAmbiguity; meanAsymmetry; varAsymmetry")
 
   private def stats(seq: Seq[Double]): (Double, Double) = {
     val mean = seq.sum / seq.size
@@ -67,35 +75,26 @@ object IteratedLearningSimulation extends App {
     (mean, variance)
   }
 
-  private def stats2(seq: Seq[Seq[Double]]): (Double, Double) = {
-    val subStats = for (values <- seq) yield stats(values)
-    val (means, _) = subStats.unzip
-    stats(means)
-  }
-
   val allGenerations = for (gen <- evolution) yield gen
-  for ((gen, data) <- allGenerations) {
-    val meanFitness = data.fitness.foldLeft(0.0)((acc, f) =>
-      f._2.doubleValue() + acc) / gen.population.size
-    val (meanAmbiguity, varAmbiguity) = stats(data.meanAmbiguities)
-    val (meanAsymmetry, varAsymmetry) = stats2(data.meanAsymmetries)
+  for ((_, data) <- allGenerations) {
+    val generation = data.generation
 
-    dataFile.println(
-      s"${gen.generation}; $meanFitness; $meanAmbiguity; $varAmbiguity; $meanAsymmetry; $varAsymmetry")
+    for(agentData <- data.agentData) {
+      val (meanAsymmetry, varAsymmetry) = stats(agentData.asymmetries)
 
-
-    // Write population distribution
-    for(key <- data.populationTypes.keySet) {
-      val count = data.populationTypes.get(key)
-      dataFile2.println(s"${gen.generation}; $key; $count")
+      dataFile.println(
+        s"$generation;" +
+        s"${agentData.idx};" +
+        s"${agentData.fitness};" +
+        s"${agentData.meanAmbiguity};" +
+        s"${agentData.varianceAmbiguity};" +
+        s"$meanAsymmetry;" +
+        s"$varAsymmetry"
+      )
     }
-    print(f"${gen.generation}%3d / $maxNrGenerations%3d\r")
     dataFile.flush()
-    dataFile2.flush()
+
+    print(s"$generation / $maxNrGenerations\r")
   }
   dataFile.close()
-  dataFile2.close()
-
-
-
 }
