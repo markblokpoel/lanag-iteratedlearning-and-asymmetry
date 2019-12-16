@@ -1,11 +1,16 @@
 package com.markblokpoel.lanag.ilasymmetry
 
-import com.markblokpoel.lanag.ambiguityhelps.{RSA1ShotAgent, RSA1ShotInteraction}
+import com.markblokpoel.lanag.ambiguityhelps.{
+  RSA1ShotAgent,
+  RSA1ShotInteraction
+}
 
 import scala.util.Random
 
 case class Population(agents: List[RSA1ShotAgent]) {
-  def fitnessOf(agent: RSA1ShotAgent, rounds: Int, interactionGroupSize: Int): Double = {
+  def fitnessOf(agent: RSA1ShotAgent,
+                rounds: Int,
+                interactionGroupSize: Int): Double = {
     if (agents.contains(agent)) {
       val agentSubset = Random.shuffle(agents).take(interactionGroupSize)
       val successRates = for (interlocutor <- agentSubset) yield {

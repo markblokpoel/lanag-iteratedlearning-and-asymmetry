@@ -6,10 +6,7 @@ case class EvolutionAgentData(idx: Int,
                               fitness: Double,
                               meanAmbiguity: Double,
                               varianceAmbiguity: Double,
-                              asymmetries: List[Double]
-                             )
+                              asymmetries: List[Double])
 
-case class EvolutionData(generation: Int,
-                         agentData: Vector[EvolutionAgentData]
-                        )
+case class EvolutionData(generation: Int, agentData: Vector[EvolutionAgentData])
     extends Data

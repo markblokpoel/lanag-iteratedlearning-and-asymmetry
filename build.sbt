@@ -19,8 +19,8 @@ lazy val commonSettings = Seq(
     "com.typesafe" % "config" % "1.3.3",
     "com.lihaoyi" %% "scalatags" % "0.7.0",
     "com.github.jupyter" % "jvm-repr" % "0.4.0" % Provided,
-    "com.markblokpoel" %% "lanag-core" % "0.3.7-SNAPSHOT",
-    "com.markblokpoel" %% "lanag-ambiguityhelps" % "0.9.2-SNAPSHOT",
+    "com.markblokpoel" %% "lanag-core" % "0.3.8",
+    "com.markblokpoel" %% "lanag-ambiguityhelps" % "0.9.2",
     "com.github.gekomad" %% "itto-csv" % "1.0.0"
   ),
   // Compile options
